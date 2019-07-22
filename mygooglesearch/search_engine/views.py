@@ -1,0 +1,106 @@
+from django.http import JsonResponse
+from datetime import datetime, timezone
+import json
+from .models import SearchInformation, SearchConfig, ResultSearch
+from .get_set_function import (
+    get_client_ip, get_google_search, get_prepare_data, 
+    save_result_to_db, get_data_from_db
+)
+
+def get_data(request):
+    """Funkcja odpowiedzialna za pobranie danych
+
+    Zależnie od tego czy dana fraza była już wyszukiwana przez danego użytkownika
+    dane będą pobrane z API bądź z bazy zależnie od konfiguracji
+    
+    Args:
+        request (http request): Http request wraz z danymi w postaci JSON {
+            search_item(str): szukana wartość
+        }
+    
+    Returns:
+        (dict/str): Wynik z danymi w postaci słownika lub pusty string jeżeli wystąpi błąd
+    """
+    search_item = json.loads(request.body.decode("utf-8"))['search_item']
+    config = SearchConfig.objects.all().values().first()
+    my_api_key = "AIzaSyB3kaR6p-JKBhEP8JYBR9Z0WL4lOGeRFWE"
+    my_cse_id = "010130671253552981765:sv-2jfffhbw"
+    ip = get_client_ip(request)
+
+    try:
+        check_search_value = SearchInformation.objects.get(search_value=search_item, user_ip_address=ip)
+    except SearchInformation.DoesNotExist:
+        google_result = get_google_search(my_api_key, my_cse_id, search_item, ip)
+        if google_result["status"]==500:
+            return JsonResponse(status=500, data=google_result["data"], safe=False)
+        
+        return JsonResponse(status=200, data=google_result["data"], safe=False)
+
+    check_time = datetime.now(timezone.utc) - check_search_value.last_search_date
+
+    if check_time.total_seconds() > int(config["time_config"]):
+        google_result = get_google_search(my_api_key, my_cse_id, search_item, ip)
+        if google_result["status"]==500:
+            return JsonResponse(status=500, data=google_result["data"], safe=False)
+        
+        return JsonResponse(status=200, data=google_result["data"], safe=False)
+    else:
+        db_result = get_data_from_db(search_item, ip)
+        if db_result:
+            return JsonResponse(status=200, data=db_result, safe=False)
+        else:
+            return JsonResponse(status=500, data=db_result, safe=False)
+
+
+def set_configure_data(request):
+    """Funkcja odpowiedzialna za ustawienie konfiguracji po 
+    jakim czasie dane zostną pobierane z bazy lub z API
+    
+    Args:
+        request (Http request): Http request z danymi w postaci JSON {
+            config_id(int): id z bazy (jeżeli będzie null zostanie założony nowy rekord)
+            time_config(str): czas po jakim dane będą pobierane z bazy lub z API
+        }
+    
+    Returns:
+        (http response): Odpowiedz http wraz z danymi w postaci JSON
+    """
+    try:
+        data_frontend = json.loads(request.body.decode("utf-8"))
+
+        config_data = SearchConfig.objects.get(id=data_frontend["config_id"])
+        config_data.time_config = data_frontend["time_config"]
+        config_data.modification_date = datetime.now()
+        config_data.save()
+
+    except SearchConfig.DoesNotExist:
+        create_config = SearchConfig()
+        create_config.time_config = data_frontend["time_config"]
+        create_config.save()
+
+    except BaseException:
+        return JsonResponse(status=500, data="", safe=False)
+    return JsonResponse(status=200, data="Pomyślnie dodano konfigurację.", safe=False)
+
+
+def get_configuration_data(request):
+    """Funkcja odpowiedziala na pobranie danych konfiguracyjnych
+    
+    Args:
+        request (Http request): Zapytanie http
+    
+    Returns:
+        (http response): odpowiedz http wraz z danymi w postaci json
+    """
+    try:
+        data_to_send = list(SearchConfig.objects.all().values())
+    except SearchConfig.DoesNotExist:
+        return JsonResponse(status=200, data=None, safe=False)
+
+    except BaseException:
+        return JsonResponse(status=500, data="", safe=False)
+
+    if data_to_send:
+        return JsonResponse(status=200, data=data_to_send, safe=False)
+    else:
+        return JsonResponse(status=200, data=None, safe=False)
