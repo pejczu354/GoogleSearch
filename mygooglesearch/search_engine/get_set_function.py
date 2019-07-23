@@ -16,13 +16,17 @@ def get_client_ip(request):
     Returns:
         (str): IP użytkownika
     """
-    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    try:
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    except AttributeError:
+        return {"status": 500, "data": "Błędny obiekt request."}
+        
     if x_forwarded_for:
         ip = x_forwarded_for.split(',')[0]
     else:
         ip = request.META.get('REMOTE_ADDR')
 
-    return ip
+    return {"status": 200, "data": ip}
 
 def get_google_search(api_key, cse_id, search_value, user_ip):
     """Funkcja odpowiedzialna za pobranie danych z API Google
@@ -47,7 +51,7 @@ def get_google_search(api_key, cse_id, search_value, user_ip):
     
     save_to_db = save_result_to_db(res, user_ip, search_value)
     if not save_to_db==True:
-        return {"status": 500, "data": ""}
+        return {"status": save_to_db["status"], "data": ""}
 
     return {"status": 200, "data": res}
 
@@ -112,7 +116,7 @@ def save_result_to_db(items, user_ip, search_value):
         info_to_save.save()
 
     except BaseException:
-        return f"SearchInfromaction - błąd: {traceback.format_exc()}"
+        return {"status": 507}
 
     try:
         search_item_result = ResultSearch.objects.filter(search_information_fk__search_value=search_value, search_information_fk__user_ip_address=user_ip)
@@ -131,7 +135,7 @@ def save_result_to_db(items, user_ip, search_value):
             result_to_save.save()
             
     except BaseException:
-        return f"ResultSearch - błąd: {traceback.format_exc()}"
+        return {"status": 507}
 
     return True
 
@@ -151,24 +155,26 @@ def get_data_from_db(search_value, user_ip):
         search_item_result = ResultSearch.objects.filter(search_information_fk__search_value=search_value, search_information_fk__user_ip_address=user_ip)
     except BaseException:
         return False
+    if search_item_result:
+        data_to_return = {
+                "searchInformation": {
+                    "formattedSearchTime": None,
+                    "formattedTotalResults": None,
+                },
+                "items": []
+            }
 
-    data_to_return = {
-            "searchInformation": {
-                "formattedSearchTime": None,
-                "formattedTotalResults": None,
-            },
-            "items": []
-        }
+        for result in search_item_result:
+            data_to_return["items"].append({
+                "position": result.position,
+                "displayLink": result.link_to_display,
+                "title": result.title,
+                "link": result.link_to_side,
+                "count_words": result.count_words,
+            })
+            data_to_return["searchInformation"]["formattedSearchTime"] = time() - start_time 
+            data_to_return["searchInformation"]["formattedTotalResults"] = len(search_item_result)
 
-    for result in search_item_result:
-        data_to_return["items"].append({
-            "position": result.position,
-            "displayLink": result.link_to_display,
-            "title": result.title,
-            "link": result.link_to_side,
-            "count_words": result.count_words,
-        })
-        data_to_return["searchInformation"]["formattedSearchTime"] = time() - start_time 
-        data_to_return["searchInformation"]["formattedTotalResults"] = len(search_item_result)
-
-    return data_to_return
+        return data_to_return
+    else:
+        return False
