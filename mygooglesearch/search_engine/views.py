@@ -30,8 +30,8 @@ def get_data(request):
         return JsonResponse(status=400, data="", safe=False)
 
     config = SearchConfig.objects.all().values().first()
-    my_api_key = "AIzaSyB3kaR6p-JKBhEP8JYBR9Z0WL4lOGeRFWE"
-    my_cse_id = "010130671253552981765:sv-2jfffhbw"
+    my_api_key = ""
+    my_cse_id = ""
     ip = get_client_ip(request)
     if ip["status"] == 200:
         try:
